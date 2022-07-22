@@ -146,14 +146,15 @@ class App(tk.Frame):
 
         # Final export
         self.finalExportButton = tk.Button(self.mainFrame, text="Exporter", font=("", 12), pady=10, padx=15, fg="white",
-                                           bg="#386384")
+                                           bg="#386384", command=self.apply_config)
         self.finalExportButton.grid(column=0, row=7, columnspan=999, padx=25, pady=30)
 
         #
         # Footer
         #
 
-        footerLabel = tk.Label(self.parent, text="SRSBA - Spreadsheet Refactoring Software for Busy Administrators - v0.2 - dev@strobe.be",
+        footerLabel = tk.Label(self.parent, text="SRSBA - Spreadsheet Refactoring Software for Busy Administrators - "
+                                                 "v0.2 - dev@strobe.be",
                                bg="lightgrey", fg="black", font=("", 7))
         footerLabel.grid(column=0, row=999, columnspan=6, sticky=tk.W + tk.E)
 
@@ -321,14 +322,7 @@ class App(tk.Frame):
                                                           width=43, state="readonly")
             self.configurationLoadComboBox.grid(column=1, row=1, rowspan=2, sticky="E", padx=10)
 
-            # Looking at choice made to get the full configuration file path
-            # self.configurationFilesList and self.configruationFilesList_GUI share the same index
-            for i in range(len(self.configurationFilesList_GUI)):
-                if self.configurationFileComboboxChoice.get() != "":
-                    if self.configurationFilesList_GUI[i] == self.configurationFileComboboxChoice.get():
-                        self.configurationFileFullPath = os.path.expanduser("~") + "/" + \
-                                                         self.configurationDirectoryName + "/" + \
-                                                         self.configurationFilesList[i]
+            self.configurationLoadComboBox.bind("<<ComboboxSelected>>", self.update_config_path)
 
         elif self.configurationChoiceVar.get() == 2:
             self.configurationLoadComboBox.destroy()
@@ -337,6 +331,24 @@ class App(tk.Frame):
                                                     fg="white", command=self.show_configuration_window,
                                                     padx=10, pady=5)
             self.configurationNewButton.grid(column=1, row=1, rowspan=2, sticky="E", padx=103)
+
+    def update_config_path(self, event):  # PyCharm says the 'event' argument is not used but it is!!
+        # See https://github.com/alejandroautalan/pygubu/issues/193
+
+        # Looking at choice made to get the full configuration file path
+        # self.configurationFilesList and self.configruationFilesList_GUI share the same index
+        print("configurationFileComboboxChoice.get(): ", end="")
+        print(self.configurationFileComboboxChoice.get())
+        for i in range(len(self.configurationFilesList_GUI)):
+            if self.configurationFileComboboxChoice.get() != "":
+                if self.configurationFilesList_GUI[i] == self.configurationFileComboboxChoice.get():
+                    self.configurationFileFullPath = os.path.expanduser("~") + "/" + \
+                                                     self.configurationDirectoryName + "/" + \
+                                                     self.configurationFilesList[i]
+
+        configFileToLoad = open(self.configurationFileFullPath, 'r')
+        self.loadedConfig = yaml.safe_load(configFileToLoad)
+        print(self.loadedConfig)
 
     def update_config_files_list(self):
         self.check_config_directory()
@@ -515,6 +527,126 @@ class App(tk.Frame):
 
             self.mappingComboBoxVarList.insert(i, mappingComboBoxVar)
 
+    def apply_config(self):
+
+        # Check if the input file and the configuration file have been imported,
+        # then check if the columns in the input file match the columns in the configuration file.
+        if self.inputFileDataframe is not None and self.configurationFileFullPath != "":
+            self.get_config()
+
+            for i in range(len(self.loadedConfig["inputFileColumnsName"])):
+                if self.loadedConfig["inputFileColumnsName"][i] == self.inputFileColumnsList[i]:
+                    print("Match !")
+
+                else:
+                    break
+                    # Throw error
+
+
+        # Dataframe filtering
+
+        # Get the number of lines, apply the filters, then get the numbers of lines again (for stats)
+        self.inputFileNbLines = self.inputFileDataframe.count()
+
+        # Colonne à filtrer, opérateur, valeur du filtre
+
+        tempDataframe = self.inputFileDataframe
+        for i in range(len(self.loadedConfig["filters"])):
+            filter_column = self.loadedConfig["filters"][i][0]
+            filter_operator = self.loadedConfig["filters"][i][1]
+            filter_value = self.loadedConfig["filters"][i][2]
+
+            if self.comparisonOperatorsList.index(filter_operator) == 0:  # Index 0 is ""
+                pass
+            elif self.comparisonOperatorsList.index(filter_operator) == 1:  # Index 1 is "est égal à"
+                tempDataframe = tempDataframe[tempDataframe[filter_column] == filter_value]
+            elif self.comparisonOperatorsList.index(filter_operator) == 2:  # Index 2 is "est différent de"
+                tempDataframe = tempDataframe[tempDataframe[filter_column] != filter_value]
+            elif self.comparisonOperatorsList.index(filter_operator) == 3:  # Index 3 is "est plus grand que"
+                tempDataframe = tempDataframe[tempDataframe[filter_column] > float(filter_value)]
+            elif self.comparisonOperatorsList.index(filter_operator) == 4:  # Index 4 is "est plus petit que"
+                tempDataframe = tempDataframe[tempDataframe[filter_column] < float(filter_value)]
+            else:
+                print("Apply filters error")
+                break
+                # Throw error
+
+        print(tempDataframe.head())
+
+        filteredDataframe = tempDataframe.copy()
+
+
+        toBeExportedDataFrame = pandas.DataFrame()
+
+        print("Length of dataframe: ", filteredDataframe.shape[1])
+        for i in range(len(self.loadedConfig["templateFileColumnsName"])):  # For each column in the template, define a new column with the
+            newColumnName = self.loadedConfig["mappings"][i][0]
+            print("Column: ", newColumnName)
+
+            if self.loadedConfig["mappings"][i][1] != "":
+                values_list = filteredDataframe[self.loadedConfig["mappings"][i][1]].tolist()
+            else:
+                values_list = ""
+
+            toBeExportedDataFrame[newColumnName] = values_list
+            print("END")
+
+
+        print(" == toBeExportedDataFrame == ")
+        print(toBeExportedDataFrame.head())
+        print(toBeExportedDataFrame ["Sexe"])
+        print(toBeExportedDataFrame.shape)
+
+
+        # Appliquer les remplacements de valeur
+        for i in range(len(self.loadedConfig["replacedValues"])):
+            replacementColumn = self.loadedConfig["replacedValues"][i][0]
+            replacementInitValue = self.loadedConfig["replacedValues"][i][1]
+            replacementReplaceValue = self.loadedConfig["replacedValues"][i][2]
+
+            if replacementColumn != "":
+                toBeExportedDataFrame[replacementColumn] = toBeExportedDataFrame[replacementColumn].replace(replacementInitValue, replacementReplaceValue)
+
+        print(" == toBeExportedDataFrame == ")
+        print(toBeExportedDataFrame.head())
+        print(toBeExportedDataFrame["Sexe"])
+        print(toBeExportedDataFrame.shape)
+
+        print(" == toBeExportedDataFrame == ")
+        print(toBeExportedDataFrame["Prénom"])
+        print(toBeExportedDataFrame["Nom"])
+
+        # Appliquer les transformations
+        for i in range(len(self.loadedConfig["transformations"])):
+            transform_column = self.loadedConfig["transformations"][i][0]
+            transform_type = self.loadedConfig["transformations"][i][1]
+
+            if transform_column != "":
+                if transform_type == self.transformationTypesList[1]:
+                    toBeExportedDataFrame = self.transform_no_accents(toBeExportedDataFrame, transform_column)
+                elif transform_type == self.transformationTypesList[2]:
+                    toBeExportedDataFrame = self.transform_to_upper(toBeExportedDataFrame, transform_column)
+                elif transform_type == self.transformationTypesList[3]:
+                    toBeExportedDataFrame = self.transform_to_lower(toBeExportedDataFrame, transform_column)
+
+        print(" == toBeExportedDataFrame == ")
+        print(toBeExportedDataFrame["Prénom"])
+        print(toBeExportedDataFrame["Nom"])
+
+    def transform_no_accents(self, dataframe, column):
+        dataframe[column] = dataframe[column].str.normalize('NFKD').str.encode('ascii', errors='ignore').str.decode('utf-8')
+        return dataframe
+
+    def transform_to_upper(self, dataframe, column):
+        dataframe[column] = dataframe[column].str.upper()
+        return dataframe
+
+    def transform_to_lower(self, dataframe, column):
+        dataframe[column] = dataframe[column].str.lower()
+        return dataframe
+
+
+
     def save_config(self):
         self.get_config()
 
@@ -536,6 +668,9 @@ class App(tk.Frame):
         self.filters = []
         for i in range(len(self.filterSourceColumnVarList)):  # Way to go through all the settings
             if self.filterSourceColumnVarList[i].get() != "":
+                print(self.filterSourceColumnVarList[i].get())
+                print(type(self.filterComparisonOperatorVarList[i].get()))
+                print(type(self.filterValueVarList[i]))
                 setting_row = [self.filterSourceColumnVarList[i].get(), self.filterComparisonOperatorVarList[i].get(),
                                self.filterValueVarList[i].get()]
                 self.filters.append(setting_row)
